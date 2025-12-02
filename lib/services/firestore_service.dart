@@ -1,7 +1,10 @@
+// lib/services/firestore_service.dart
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/user_model.dart';
 import '../models/item_model.dart';
-import 'package:flutter/foundation.dart'; // print 사용을 위해 추가
+import 'package:flutter/foundation.dart';
+import 'dart:async';
 
 class FirestoreService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -9,7 +12,7 @@ class FirestoreService {
   static const String _itemsCollection = 'items';
 
   // ==========================================
-  // 👤 사용자(User) 관련 메서드
+  // 👤 사용자(User) 관련 메서드 (기존 코드 유지)
   // ==========================================
 
   // 1. 사용자 정보 저장
@@ -157,7 +160,7 @@ class FirestoreService {
     }
   }
 
-  // 2. 위치 기반 게시글 조회
+  // 2. 위치 기반 게시글 조회 (실시간 동기화)
   static Stream<List<ItemModel>> getItemsByLocation(String locationName) {
     if (kDebugMode) {
       print('🔥 위치 기반 조회 요청: $locationName');
@@ -177,30 +180,37 @@ class FirestoreService {
     });
   }
 
-  // 3. 사용자별 게시글 조회 (Future 버전)
-  static Future<List<ItemModel>> getItemsByUserId(String userId) async {
-    try {
-      final querySnapshot = await _firestore
-          .collection(_itemsCollection)
-          .where('userId', isEqualTo: userId)
-          .orderBy('createdAt', descending: true)
-          .get();
+  // ⭐️ 3. 위치 및 카테고리 기반 게시글 조회 (HomeScreen 카테고리 필터링용)
+  /// 카테고리가 '동네소식'이 아닐 경우 필터링을 적용합니다.
+  static Stream<List<ItemModel>> getItemsByLocationAndCategory(String locationName, String category) {
+    if (kDebugMode) {
+      print('🔥 위치 및 카테고리 조회 요청: $locationName, $category');
+    }
 
-      return querySnapshot.docs.map((doc) {
-        final data = doc.data();
+    Query query = _firestore
+        .collection(_itemsCollection)
+        .where('location', isEqualTo: locationName);
+
+    // '동네소식'은 전체보기 카테고리로 간주
+    if (category != '동네소식' && category != '전체' && category.isNotEmpty) {
+      // ⚠️ 주의: location과 category를 동시에 필터링하려면 Firestore 복합 인덱스가 필요합니다.
+      // (location ASC, category ASC, createdAt DESC)
+      query = query.where('category', isEqualTo: category);
+    }
+
+    query = query.orderBy('createdAt', descending: true);
+
+    return query.snapshots().map((snapshot) {
+      return snapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
         data['id'] = doc.id;
         return ItemModel.fromJson(data);
       }).toList();
-    } catch (e) {
-      if (kDebugMode) {
-        print('❌ 사용자 판매 내역 조회 실패: $e');
-      }
-      return [];
-    }
+    });
   }
 
-  // ⭐️ 4. 사용자별 게시글 실시간 스트림 조회 (Stream 버전)
-  /// 특정 사용자가 작성한 게시글 목록을 실시간으로 스트리밍합니다.
+
+  // 4. 사용자별 게시글 실시간 스트림 조회 (Stream 버전)
   static Stream<List<ItemModel>> streamItemsByUserId(String userId) {
     if (kDebugMode) {
       print('🔥 사용자 ID 기반 실시간 조회 요청: $userId');
@@ -233,6 +243,74 @@ class FirestoreService {
         print('❌ 게시글 삭제 실패: $e');
       }
       rethrow;
+    }
+  }
+
+  // ⭐️ 6. 통합 검색 로직 (SearchScreen에서 사용)
+  static Future<List<ItemModel>> searchItems(String query) async {
+    final queryLower = query.toLowerCase();
+
+    // 1. 카테고리 일치 검색
+    final categorySnapshot = await _firestore.collection(_itemsCollection)
+        .where('category', isEqualTo: query)
+        .get();
+
+    final List<ItemModel> categoryResults = categorySnapshot.docs.map((doc) {
+      final data = doc.data();
+      data['id'] = doc.id;
+      return ItemModel.fromJson(data);
+    }).toList();
+
+    // 2. 제목 기반 검색 (클라이언트 필터링 - Firestore FTS 부재로 인한 임시 조치)
+    // 🚨 대규모 데이터에서는 성능 문제가 발생하므로, 실제 서비스에서는 Algolia 등이 필요합니다.
+    final allItemsSnapshot = await _firestore.collection(_itemsCollection).get();
+
+    final List<ItemModel> titleResults = allItemsSnapshot.docs
+        .map((doc) {
+      final data = doc.data();
+      data['id'] = doc.id;
+      return ItemModel.fromJson(data);
+    })
+        .where((item) => item.title.toLowerCase().contains(queryLower))
+        .toList();
+
+    // 3. 결과 병합 및 중복 제거
+    final allResultsMap = { for (var item in categoryResults) item.id: item };
+    for (var item in titleResults) {
+      allResultsMap[item.id] = item;
+    }
+
+    return allResultsMap.values.toList();
+  }
+
+  // ⭐️ 7. 게시글 수 기준 상위 N개 카테고리 조회 (HomeScreen 탭용)
+  static Future<List<String>> getTopCategories(int limit) async {
+    try {
+      // 🚨 Firebase는 GROUP BY를 지원하지 않아 모든 문서를 가져와 클라이언트에서 처리합니다.
+      final snapshot = await _firestore.collection(_itemsCollection).get();
+
+      Map<String, int> categoryCounts = {};
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final category = data['category'] as String?;
+        if (category != null && category.isNotEmpty && category != '동네소식' && category != '기타') {
+          categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
+        }
+      }
+
+      final sortedCategories = categoryCounts.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+
+      // 상위 limit개만 추출
+      return sortedCategories.take(limit).map((e) => e.key).toList();
+
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ 상위 카테고리 조회 실패: $e');
+      }
+      // 오류 시 기본 카테고리 목록 반환
+      return ['가구/홈 물품', '생활/공산품', '디지털기기'];
     }
   }
 }
