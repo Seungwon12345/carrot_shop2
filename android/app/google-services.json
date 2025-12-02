@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "21067807774",
+    "project_id": "carrotmarket1-6ac73",
+    "storage_bucket": "carrotmarket1-6ac73.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:21067807774:android:3675a522c85d740d18420f",
+        "android_client_info": {
+          "package_name": "com.example.carrot_shop"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxbL473rqIRsthUuzj0oktO-Ul-chEvHI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:21067807774:android:a78c05e8414dfdf518420f",
+        "android_client_info": {
+          "package_name": "com.example.carrotmarkget"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxbL473rqIRsthUuzj0oktO-Ul-chEvHI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:21067807774:android:21540c845364311f18420f",
+        "android_client_info": {
+          "package_name": "com.example.sm_market"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxbL473rqIRsthUuzj0oktO-Ul-chEvHI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

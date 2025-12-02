@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="client_id">E50w5MEd2s5lDphm74K4</string>
+
+    <string name="client_secret">5XHdqmrTHv</string>
+
+    <string name="client_name">당근마켓</string>
+</resources>
