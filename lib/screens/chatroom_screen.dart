@@ -1,17 +1,12 @@
-// lib/screens/chat_room_screen.dart (수정된 전체 코드)
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart'; // ⭐️ [추가] 지도 앱 실행용
-import '../models/chat_room_models.dart';
-import '../models/message_models.dart';
-import '../services/chat_service.dart';
-import '../services/firestore_service.dart';
-import 'location_picker_screen.dart'; // ⭐️ 장소 선택 화면 임포트
+import 'package:firebase_auth/firebase_auth.dart';
+import '../models/chat_room_models.dart'; // ✅ ChatRoom 모델 (팀원 파일명 확인 필요)
+import '../services/chat_service.dart';   // ✅ ChatService
+import 'location_picker_screen.dart';     // ✅ 위치 공유 화면
 
 class ChatRoomScreen extends StatefulWidget {
-  final ChatRoom chatRoom;
+  final ChatRoom chatRoom; // ✅ 팀원 모델 클래스 이름 (ChatRoomModel -> ChatRoom)
   final String currentUserId;
 
   const ChatRoomScreen({
@@ -28,18 +23,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ChatService _chatService = ChatService();
 
-  String? _opponentNickname;
-  late final String _opponentId;
-
-  String get _chatId => widget.chatRoom.chatId;
+  late String otherUserId; // 상대방 ID
 
   @override
   void initState() {
     super.initState();
-    _opponentId = widget.chatRoom.sellerId == widget.currentUserId
+    // ⭐️ 상대방 ID 계산 (팀원 모델 필드명: sellerId, buyerId 사용)
+    otherUserId = (widget.chatRoom.sellerId == widget.currentUserId)
         ? widget.chatRoom.buyerId
         : widget.chatRoom.sellerId;
-    _fetchOpponentNickname();
   }
 
   @override
@@ -48,360 +40,155 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     super.dispose();
   }
 
-  void _fetchOpponentNickname() async {
-    try {
-      final nickname = await FirestoreService.getUserNickname(_opponentId);
-      if (mounted) {
-        setState(() {
-          _opponentNickname = nickname;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _opponentNickname = '닉네임 로드 실패';
-        });
-      }
+  // ⭐️ [핵심 기능] + 버튼: 위치 공유 화면 이동
+  void _onPlusButtonPressed() {
+    final myId = widget.currentUserId;
+
+    if (myId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('로그인 정보가 없습니다.')),
+      );
+      return;
     }
+
+    // 위치 공유 화면으로 이동
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LocationPickerScreen(
+          chatRoomId: widget.chatRoom.chatId, // ✅ 팀원 모델 필드명 (id -> chatId)
+          myUserId: myId,
+          otherUserId: otherUserId,
+          otherUserName: '상대방', // (필요시 DB에서 닉네임 조회 추가)
+        ),
+      ),
+    );
   }
 
-  // ⭐️ [수정]: 텍스트 메시지 전송 로직
-  void _handleSendMessage() async {
+  // 메시지 전송 함수
+  void _sendMessage() async {
     final text = _messageController.text.trim();
-    if (text.isNotEmpty) {
-      _messageController.clear();
-      try {
-        await _chatService.sendMessage(
-          chatId: _chatId,
-          senderId: widget.currentUserId,
-          content: text,
-          type: 'text',
-        );
-      } catch (e) {
-        print('❌ 텍스트 메시지 전송 실패: $e');
-        _showErrorSnackbar(e);
-      }
-    }
-  }
+    if (text.isEmpty) return;
 
-  // ⭐️ [새 함수]: 장소 메시지 전송 로직
-  void _sendLocationMessage(Map<String, dynamic> locationData) async {
+    _messageController.clear(); // 미리 지움 (빠른 반응성)
+
     try {
-      final String address = locationData['address'] as String? ?? '지도 장소';
-      final double lat = locationData['latitude'] as double;
-      final double lng = locationData['longitude'] as double;
-
+      // ✅ 팀원 서비스 함수에 맞춰 'Named Parameter' 방식으로 호출
       await _chatService.sendMessage(
-        chatId: _chatId,
-        senderId: widget.currentUserId,
-        content: address,
-        type: 'location', // ⭐️ 메시지 타입을 'location'으로 지정
-        locationLat: lat,
-        locationLng: lng,
+        chatId: widget.chatRoom.chatId,      // roomId -> chatId
+        senderId: widget.currentUserId,      // userId -> senderId
+        content: text,                       // text -> content
       );
     } catch (e) {
-      print('❌ 장소 메시지 전송 실패: $e');
-      _showErrorSnackbar(e);
-    }
-  }
-
-  // ⭐️ [새 함수]: 지도 앱 실행 로직
-  void _launchMap(double lat, double lng) async {
-    // Google Maps URL Scheme (iOS) 또는 Intent (Android) 사용
-    final String url = 'https://maps.google.com/?q=$lat,$lng';
-    final uri = Uri.parse(url);
-
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('지도 앱을 열 수 없습니다.')),
+          SnackBar(content: Text('전송 실패: $e')),
         );
       }
-    }
-  }
-
-  void _showErrorSnackbar(Object e) {
-    String errorMessage = '메시지 전송에 실패했습니다.';
-    if (e is FirebaseException) {
-      errorMessage = '전송 실패: ${e.code}';
-    }
-
-    if(mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(errorMessage),
-          backgroundColor: Colors.red,
-        ),
-      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final String opponentDisplayName = _opponentNickname ?? '닉네임 로딩 중...';
-
     return Scaffold(
       appBar: AppBar(
+        title: const Text('채팅방', style: TextStyle(color: Colors.black)),
         backgroundColor: Colors.white,
-        elevation: 1,
-        iconTheme: const IconThemeData(color: Colors.black),
-        title: Text(
-          opponentDisplayName,
-          style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.more_vert),
-            onPressed: () { /* 메뉴 */ },
-          ),
-        ],
+        foregroundColor: Colors.black,
+        elevation: 0.5,
       ),
       body: Column(
         children: [
-          _buildItemInfo(context),
-
+          // 1. 메시지 리스트
           Expanded(
-            child: StreamBuilder<List<Message>>(
-              stream: _chatService.getChatMessages(_chatId),
+            child: StreamBuilder<QuerySnapshot>(
+              // ✅ 팀원 서비스 코드의 컬렉션 구조 반영 (chat_start/{chatId}/messages)
+              stream: FirebaseFirestore.instance
+                  .collection('chat_start')
+                  .doc(widget.chatRoom.chatId)
+                  .collection('messages')
+                  .orderBy('timestamp', descending: true)
+                  .snapshots(),
               builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Center(child: Text('오류 발생: ${snapshot.error}'));
+                }
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                if (snapshot.hasError) {
-                  return Center(child: Text('대화 내용을 불러오는 중 오류 발생: ${snapshot.error}'));
-                }
 
-                final messages = snapshot.data ?? [];
+                final docs = snapshot.data!.docs;
 
-                if (messages.isEmpty) {
-                  return const Center(
-                    child: Text('아직 대화가 없습니다. 메시지를 보내서 대화를 시작해 보세요!', style: TextStyle(color: Colors.grey)),
-                  );
+                if (docs.isEmpty) {
+                  return const Center(child: Text('대화를 시작해보세요!'));
                 }
 
                 return ListView.builder(
                   reverse: true,
-                  itemCount: messages.length,
+                  itemCount: docs.length,
                   itemBuilder: (context, index) {
-                    return _buildMessageBubble(messages[index]);
+                    final data = docs[index].data() as Map<String, dynamic>;
+                    final isMe = data['senderId'] == widget.currentUserId;
+                    final content = data['text'] ?? ''; // 팀원 DB 필드명 확인 필요 (보통 'text' 또는 'content')
+
+                    return Align(
+                      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: isMe ? Colors.orange : Colors.grey[300],
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          content,
+                          style: TextStyle(color: isMe ? Colors.white : Colors.black),
+                        ),
+                      ),
+                    );
                   },
                 );
               },
             ),
           ),
 
-          _buildMessageInput(),
-        ],
-      ),
-    );
-  }
-
-  // ⭐️ [수정된 함수] 메시지 버블 위젯 (장소 메시지 처리 추가)
-  Widget _buildMessageBubble(Message message) {
-    final bool isMe = message.senderId == widget.currentUserId;
-    final timeString = DateFormat('a h:mm', 'ko').format(message.timestamp.toDate());
-    final String nickname = _opponentNickname ?? '사용자';
-
-    final mainAxisAlignment = isMe ? MainAxisAlignment.end : MainAxisAlignment.start;
-    final crossAxisAlignment = isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
-
-
-    Widget messageContent;
-
-    // ⭐️ [핵심]: 메시지 타입에 따라 내용 위젯 변경
-    if (message.type == 'location' && message.locationLat != null && message.locationLng != null) {
-      // 장소 메시지 위젯
-      messageContent = GestureDetector(
-        onTap: () => _launchMap(message.locationLat!, message.locationLng!),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Icon(Icons.location_on, color: Colors.blue, size: 20),
-            const SizedBox(height: 4),
-            Text(
-              '거래 장소: ${message.text}',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: isMe ? Colors.black : Colors.black87,
+          // 2. 입력창 영역
+          SafeArea(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border(top: BorderSide(color: Colors.grey.shade300)),
               ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 2),
-            const Text(
-              '눌러서 지도 앱 확인',
-              style: TextStyle(color: Colors.grey, fontSize: 11),
-            ),
-          ],
-        ),
-      );
-    } else {
-      // 기본 텍스트 메시지 위젯
-      messageContent = Text(
-        message.text,
-        style: TextStyle(color: isMe ? Colors.black : Colors.black87),
-      );
-    }
-
-    // ... (이후 버블 레이아웃 로직은 기존과 동일) ...
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
-      child: Column(
-        crossAxisAlignment: crossAxisAlignment,
-        children: [
-          if (!isMe)
-            Padding(
-              padding: const EdgeInsets.only(left: 8.0, bottom: 4.0),
-              child: Text(
-                nickname,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-              ),
-            ),
-
-          Row(
-            mainAxisAlignment: mainAxisAlignment,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (isMe)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8.0, bottom: 2.0),
-                  child: Text(
-                    timeString,
-                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+              child: Row(
+                children: [
+                  // + 버튼 (위치 공유)
+                  IconButton(
+                    icon: const Icon(Icons.add_circle_outline, size: 28),
+                    color: Colors.grey,
+                    onPressed: _onPlusButtonPressed,
                   ),
-                ),
 
-              // 메시지 버블
-              Container(
-                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
-                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
-                decoration: BoxDecoration(
-                    color: isMe ? Colors.orange.shade100 : Colors.grey.shade200,
-                    borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(15),
-                      topRight: const Radius.circular(15),
-                      bottomLeft: isMe ? const Radius.circular(15) : const Radius.circular(5),
-                      bottomRight: isMe ? const Radius.circular(5) : const Radius.circular(15),
+                  // 텍스트 필드
+                  Expanded(
+                    child: TextField(
+                      controller: _messageController,
+                      decoration: const InputDecoration(
+                        hintText: '메시지 보내기',
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(horizontal: 10),
+                      ),
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 2,
-                        offset: const Offset(0, 1),
-                      )
-                    ]
-                ),
-                child: messageContent, // ⭐️ [수정]: 준비된 messageContent 위젯 사용
-              ),
-
-              if (!isMe)
-                Padding(
-                  padding: const EdgeInsets.only(left: 8.0, bottom: 2.0),
-                  child: Text(
-                    timeString,
-                    style: const TextStyle(fontSize: 11, color: Colors.grey),
                   ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
 
-  Widget _buildItemInfo(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.grey.shade200, width: 1)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 50,
-            height: 50,
-            decoration: BoxDecoration(
-              color: Colors.grey.shade300,
-              borderRadius: BorderRadius.circular(5),
-            ),
-            child: const Icon(Icons.image, size: 24, color: Colors.white), // 상품 이미지
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '판매 상품 ID: ${widget.chatRoom.itemId}',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const Text(
-                  '가격 정보 (조회 필요)',
-                  style: TextStyle(color: Colors.black, fontSize: 14),
-                ),
-              ],
-            ),
-          ),
-          TextButton(
-            onPressed: () { /* 거래 완료, 또는 상품 보기 */ },
-            child: const Text('거래 완료', style: TextStyle(color: Colors.blue)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ⭐️ [수정된 함수] 메시지 입력창 위젯
-  Widget _buildMessageInput() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
-      color: Colors.white,
-      child: Row(
-        children: <Widget>[
-          IconButton(
-            icon: const Icon(Icons.add, color: Colors.grey),
-            onPressed: () async {
-              // ⭐️ [핵심 수정]: 장소 선택 화면 호출 로직의 주석을 해제합니다.
-              final selectedLocation = await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const LocationPickerScreen(),
-                ),
-              );
-
-              // ⭐️ 장소 선택 결과가 있으면 전송
-              if (selectedLocation != null && selectedLocation is Map<String, dynamic>) {
-                _sendLocationMessage(selectedLocation);
-              }
-
-              // 🚨 임시 안내 스낵바 코드를 제거했습니다.
-            },
-          ),
-          Expanded(
-            child: TextField(
-              controller: _messageController,
-              decoration: InputDecoration(
-                hintText: '메시지를 입력하세요...',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20.0),
-                  borderSide: BorderSide.none,
-                ),
-                filled: true,
-                fillColor: Colors.grey.shade200,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  // 전송 버튼
+                  IconButton(
+                    icon: const Icon(Icons.send, color: Colors.orange),
+                    onPressed: _sendMessage,
+                  ),
+                ],
               ),
-              minLines: 1,
-              maxLines: 5,
             ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.send, color: Colors.orange),
-            onPressed: _handleSendMessage,
           ),
         ],
       ),

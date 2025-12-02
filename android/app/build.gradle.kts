@@ -9,11 +9,8 @@ if (localPropertiesFile.exists()) {
 
 plugins {
     id("com.android.application")
-    // START: FlutterFire Configuration
     id("com.google.gms.google-services")
-    // END: FlutterFire Configuration
     id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
@@ -25,7 +22,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
-
         isCoreLibraryDesugaringEnabled = true
     }
 
@@ -39,13 +35,32 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
 
-        // ❌ 네이버 로그인 관련 manifestPlaceholders 제거*       // Manifest에서는 @string/client_id 방식으로 불러오기 때문에 필요 없음
+    // 👇 [여기입니다!] 아까 만드신 키 정보를 여기에 적는 겁니다.
+    signingConfigs {
+        create("release") {
+            storeFile = file("my_key.jks")  // 파일 이름
+            storePassword = "123456"        // 아까 설정한 비번
+            keyAlias = "my-alias"           // 아까 설정한 별칭
+            keyPassword = "123456"          // 아까 설정한 비번
+        }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            // 코드 난독화 및 리소스 축소 활성화
+            isMinifyEnabled = true
+            isShrinkResources = true
+
+            // 네이버 로그인 보호 규칙 파일 연결
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+
+            // ⭐️ 위에서 만든 'release' 서명 정보를 사용하겠다고 설정
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

@@ -12,9 +12,10 @@ import 'chat_screen.dart';
 import 'post_detail_screen.dart';
 import 'profile_screen.dart';
 import 'search_screen.dart'; // 실제 검색 화면 파일이 존재해야 합니다.
+import 'neighborhood_map_screen.dart'; // ✅ 지도 화면 임포트 (코드 1에서 가져옴)
 
 //==================================================
-// 0. 천안시 동 이름 매핑 유틸리티 클래스 (Snippet 1 유지)
+// 0. 천안시 동 이름 매핑 유틸리티 클래스 (코드 2 유지)
 //==================================================
 
 class CheonanLocationMapper {
@@ -56,7 +57,7 @@ class CheonanLocationMapper {
 }
 
 //==================================================
-// 1. PostListWidget (Firebase 연동 + 카테고리 필터링)
+// 1. PostListWidget (Firebase 연동 + 카테고리 필터링 - 코드 2 버전)
 //==================================================
 
 class PostListWidget extends StatelessWidget {
@@ -73,7 +74,7 @@ class PostListWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 1. 영문 동 이름을 한글로 변환 (Snippet 1 로직 적용)
+    // 1. 영문 동 이름을 한글로 변환
     final String koreanLocation = CheonanLocationMapper.convertToKorean(selectedLocation);
 
     // 2. '동' 이름만 추출 (예: '충남 천안시 서북구 성정동' -> '성정동')
@@ -236,7 +237,7 @@ class PostListWidget extends StatelessWidget {
 }
 
 //==================================================
-// 2. 더미 화면 (SearchScreen은 별도 파일로 분리됨을 가정)
+// 2. 더미 화면 (SearchScreen은 별도 파일 사용 권장)
 //==================================================
 
 class PlaceholderScreen extends StatelessWidget {
@@ -310,7 +311,6 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     } catch (e) {
-      // 에러 발생 시 빈 리스트 유지 또는 로그 출력
       if (kDebugMode) {
         print("카테고리 로드 실패: $e");
       }
@@ -327,7 +327,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // 카테고리 칩 버튼 생성
+  // 카테고리 칩 버튼 생성 (선택 로직 포함)
   Widget _buildCategoryButton(String text) {
     bool isSelected = text == _selectedCategory;
 
@@ -367,7 +367,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // ⭐️ 영문 동 이름을 한글로 변환 (AppBar 표시용)
     final String displayLocation = CheonanLocationMapper.convertToKorean(widget.selectedLocation);
 
-    // ⭐️ _widgetOptions 구성
+    // ⭐️ _widgetOptions 구성: 코드 1의 지도 화면 + 코드 2의 PostListWidget
     final List<Widget> _widgetOptions = <Widget>[
       // 0. 홈 (PostListWidget): 위치 정보와 선택된 카테고리 전달
       PostListWidget(
@@ -375,15 +375,23 @@ class _HomeScreenState extends State<HomeScreen> {
         currentUserId: currentUserId,
         selectedCategory: _selectedCategory,
       ),
-      // 1. 동네 지도
-      const PlaceholderScreen(screenName: '동네 지도'),
+      // 1. 동네 지도 (✅ 코드 1에서 병합된 지도 화면)
+      const NeighborhoodMapScreen(),
       // 2. 채팅
       ChatScreen(currentUserId: currentUserId),
       // 3. 나의 마켓/프로필
       const ProfileScreen(),
     ];
 
-    // 홈 탭이 아닐 경우의 Scaffold (간소화된 AppBar)
+    // ⭐️ 1. 동네 지도 탭일 경우 (AppBar 없이 전체 화면 - 코드 1 스타일)
+    if (_selectedIndex == 1) {
+      return Scaffold(
+        body: _widgetOptions[_selectedIndex],
+        bottomNavigationBar: _buildBottomNavigationBar(),
+      );
+    }
+
+    // ⭐️ 2. 홈 탭이 아닐 경우의 Scaffold (간소화된 AppBar)
     if (_selectedIndex != 0) {
       final List<String> appBarTitles = ['중고거래', '동네 지도', '채팅', '나의 마켓'];
       return Scaffold(
@@ -402,7 +410,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // 홈 화면 (첫 번째 탭)
+    // ⭐️ 3. 홈 화면 (첫 번째 탭)
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -428,7 +436,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        // ⭐️ SearchScreen에 userId 전달
+                        // ⭐️ SearchScreen에 userId 전달 (코드 2 로직)
                         builder: (context) => SearchScreen(currentUserId: widget.userId),
                       ),
                     );
