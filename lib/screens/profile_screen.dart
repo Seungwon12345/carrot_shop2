@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import '../services/storage_service.dart'; // ⭐️ StorageService 임포트
 import '../models/user_model.dart';      // ⭐️ UserModel 임포트
-import 'my_post_screen.dart'; // ⭐️ MyPostsScreen 임포트 추가 (경로 확인 필요)
+import 'my_post_screen.dart'; // ⭐️ MyPostsScreen 및 PostListType 임포트
+import 'wish_list_screen.dart'; // ⭐️ WishListScreen 임포트
 
 // 1. StatefulWidget으로 변경
 class ProfileScreen extends StatefulWidget {
@@ -106,7 +107,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildMenuItem(
             icon: Icons.receipt_long,
             title: '판매 내역',
-            onTap: () { print('판매 내역 이동'); },
+            // ⭐️ 🚨 핵심 수정: MyPostsScreen으로 이동하며 listType.salesHistory를 전달
+            onTap: isUserLoaded ? () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => MyPostsScreen(
+                    userId: currentUserId,
+                    nickname: currentNickname,
+                    listType: PostListType.salesHistory, // 👈 판매 내역 지정
+                  ),
+                ),
+              );
+            } : () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('사용자 정보를 불러올 수 없습니다.')),
+              );
+            },
           ),
           _buildMenuItem(
             icon: Icons.shopping_bag_outlined,
@@ -116,7 +133,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildMenuItem(
             icon: Icons.favorite_border,
             title: '관심 목록',
-            onTap: () { print('관심 목록 이동'); },
+            // ⭐️ 🚨 수정된 부분: WishListScreen으로 이동
+            onTap: isUserLoaded ? () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => WishListScreen( // WishListScreen으로 이동
+                    currentUserId: currentUserId,
+                  ),
+                ),
+              );
+            } : () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('사용자 정보를 불러올 수 없습니다.')),
+              );
+            },
           ),
 
           const Divider(height: 10, thickness: 10, color: Color(0xFFF5F5F5)),
@@ -136,7 +167,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildMenuItem(
             icon: Icons.article_outlined,
             title: '내 게시글',
-            // ⭐️ [핵심]: MyPostsScreen으로 이동 및 ID, 닉네임 전달
+            // ⭐️ 🚨 핵심 수정: MyPostsScreen으로 이동하며 listType.myPosts를 전달
             onTap: isUserLoaded ? () {
               Navigator.push(
                 context,
@@ -144,11 +175,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   builder: (context) => MyPostsScreen(
                     userId: currentUserId,
                     nickname: currentNickname,
+                    listType: PostListType.myPosts, // 👈 내 게시글 지정
                   ),
                 ),
               );
             } : () {
-              // 사용자 정보 로드 실패 시
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('사용자 정보를 불러오지 못했습니다.')),
               );
@@ -193,21 +224,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         const Divider(height: 0, thickness: 0.5, indent: 16, endIndent: 16, color: Color(0xFFF5F5F5)),
 
+        // 🚨 onTap 제거 상태 유지 (레이아웃 오류 방지 및 읽기 전용 처리)
         _buildUserInfoField(
           '휴대폰 번호',
           _userPhone, // ⭐️ 실제 휴대폰 번호 사용
-          onTap: () { print('휴대폰 번호 변경'); },
         ),
         _buildUserInfoField(
           '아이디',
           _userId, // ⭐️ 실제 ID 사용
-          onTap: () { print('아이디 변경'); },
         ),
         _buildUserInfoField(
           '닉네임',
           _userNickname, // ⭐️ 실제 닉네임 사용
-          onTap: () { print('닉네임 변경'); },
         ),
+        // 비밀번호 변경만 onTap 유지
         _buildUserInfoField(
           '비밀번호',
           '••••••••', // 비밀번호는 항상 마스킹
@@ -219,20 +249,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // ⭐️ 🚨 핵심 수정: Flexible 대신 SizedBox와 TextOverflow.ellipsis를 사용하여 최대 너비 명시
   Widget _buildUserInfoField(String title, String value, {VoidCallback? onTap}) {
-    return ListTile(
-      dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 0),
-      title: Text(title, style: const TextStyle(fontSize: 13, color: Colors.grey)),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(value, style: const TextStyle(fontSize: 15, color: Colors.black)),
-          const SizedBox(width: 8),
-          const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
-        ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0), // 좌우 패딩만 유지
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          // dense: true와 contentPadding을 수직 패딩으로 대체
+          padding: const EdgeInsets.symmetric(vertical: 8.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // 1. Title (Expanded로 남은 공간 확보)
+              Expanded(
+                child: Text(title, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+              ),
+
+              // 2. Trailing Row (값 + 화살표)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 🚨 수정된 부분: SizedBox 너비를 120.0으로 조정하여 긴 ID가 잘리도록 명시적으로 제한
+                  SizedBox(
+                    width: 120.0, // 아이디/전화번호가 표시될 최대 너비를 120.0으로 지정
+                    child: Text(
+                      value,
+                      style: const TextStyle(fontSize: 15, color: Colors.black),
+                      overflow: TextOverflow.ellipsis, // 넘치는 텍스트를 ... 처리
+                      textAlign: TextAlign.right, // 오른쪽 정렬
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // onTap이 있을 때만 화살표 표시
+                  if (onTap != null) const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
-      onTap: onTap,
     );
   }
 

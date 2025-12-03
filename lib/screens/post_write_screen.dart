@@ -1,3 +1,5 @@
+// lib/screens/post_write_screen.dart (지도 기능 통합, 나눔하기 제거 최종 버전)
+
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
@@ -7,17 +9,19 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/item_model.dart';
 import '../services/firebase_storage_service.dart';
 import '../services/firestore_service.dart';
+// 🚀 [추가] 지도 선택 화면 import
+import 'map_selection_screen.dart';
 
 class PostWriteScreen extends StatefulWidget {
   final String userLocation; // 현재 사용자 동네 (예: 충남 천안시 서북구 두정동)
-  final String userId;       // 💡 현재 로그인된 사용자 ID (판매자 등록용)
-  final ItemModel? editingPost; // ⭐️ [추가] 수정할 기존 게시글 데이터
+  final String userId;
+  final ItemModel? editingPost;
 
   const PostWriteScreen({
     super.key,
     required this.userLocation,
     required this.userId,
-    this.editingPost, // ⭐️ [추가] 생성자 매개변수로 받도록 정의
+    this.editingPost,
   });
 
   @override
@@ -30,12 +34,16 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
   final _priceController = TextEditingController();
 
   List<File> _selectedImages = [];
-  List<String> _existingImageUrls = []; // 기존 이미지 URL 저장
-  bool _isSelling = true; // 판매하기(true) vs 나누기(false)
-  String _selectedCategory = '디지털기기'; // 기본 카테고리
+  List<String> _existingImageUrls = [];
+  // 🚨 [수정]: 나눔 기능을 제거하므로, _isSelling 변수는 더 이상 필요 없습니다.
+  // bool _isSelling = true;
+  String _selectedCategory = '디지털기기';
   bool _isPriceSuggestionAllowed = false;
 
   bool _isLoading = false;
+
+  // 🚀 [추가]: 사용자가 지도에서 직접 설정한 상세 거래 장소 정보 저장 변수
+  Map<String, dynamic>? _selectedTradeLocation;
 
   final List<String> _categories = [
     '디지털기기', '생활가전', '가구/인테리어', '생활/가공식품', '유아동', '스포츠/레저', '의류', '도서', '기타'
@@ -44,10 +52,10 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeFieldsForEditing(); // ⭐️ [추가] 수정 모드 초기화 함수 호출
+    _initializeFieldsForEditing();
   }
 
-  // ⭐️ [새 함수]: 수정 모드일 때 필드를 기존 데이터로 채웁니다.
+  // 수정 모드일 때 필드를 기존 데이터로 채웁니다.
   void _initializeFieldsForEditing() {
     if (widget.editingPost != null) {
       final post = widget.editingPost!;
@@ -55,15 +63,18 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
       _contentController.text = post.content;
       _priceController.text = post.price > 0 ? post.price.toString() : '';
 
-      _isSelling = post.status == '판매중' || post.price > 0;
+      // 🚨 [수정]: 나눔 로직 제거. 가격이 0 이상이면 그대로 표시.
+      // _isSelling = post.status == '판매중' || post.price > 0;
       _selectedCategory = post.category;
       _existingImageUrls = List.from(post.imageUrls);
+
+      // 🚀 [추가]: 수정 모드 시 기존 상세 위치 정보 로드
+      _selectedTradeLocation = post.tradeLocationDetail;
     }
   }
 
   // 1. 이미지 선택 함수
   Future<void> _pickImage() async {
-    // ⭐️ [수정]: 기존 이미지와 새 이미지를 합쳐서 최대 개수를 체크합니다.
     if (_selectedImages.length + _existingImageUrls.length >= 10) {
       _showSnackbar('사진은 최대 10장까지 등록할 수 있습니다.', success: false);
       return;
@@ -79,6 +90,22 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
     }
   }
 
+  // 🚀 [새 함수]: 지도 기반 위치 선택 처리 및 결과 저장
+  Future<void> _handleLocationSelection() async {
+    final Map<String, dynamic>? selectedData = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const MapSelectionScreen()),
+    );
+
+    if (selectedData != null) {
+      setState(() {
+        _selectedTradeLocation = selectedData;
+      });
+      _showSnackbar('거래 희망 장소가 설정되었습니다.', success: true);
+    }
+  }
+
+
   // 2. 게시글 작성/수정 완료 처리 (Firebase 연동 핵심 로직)
   Future<void> _handleSubmit() async {
     // 1차 입력 검증
@@ -86,20 +113,24 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
       _showSnackbar('제목과 내용을 입력해주세요.', success: false);
       return;
     }
-    if (_isSelling && _priceController.text.isEmpty) {
+    // 🚨 [수정]: 가격 입력은 판매에서 필수가 됩니다. (나눔 제거)
+    if (_priceController.text.isEmpty) {
       _showSnackbar('가격을 입력해주세요.', success: false);
       return;
     }
-    // ⭐️ [수정]: 기존 이미지 또는 새로 선택된 이미지가 하나라도 있어야 합니다.
     if (_selectedImages.isEmpty && _existingImageUrls.isEmpty) {
       _showSnackbar('최소 한 장의 사진을 등록해주세요.', success: false);
+      return;
+    }
+    // 🚀 [추가]: 거래 희망 장소 설정 여부 검증
+    if (_selectedTradeLocation == null) {
+      _showSnackbar('거래 희망 장소를 지도에서 설정해주세요.', success: false);
       return;
     }
 
     setState(() => _isLoading = true);
 
     try {
-      // ⭐️ [수정]: 수정 모드면 기존 ID 사용, 아니면 새 ID 생성
       final String itemId = widget.editingPost?.id ?? FirebaseFirestore.instance.collection('items').doc().id;
 
       // 2. 이미지 업로드 (Firebase Storage)
@@ -107,7 +138,6 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
         _selectedImages,
         itemId,
       );
-      // ⭐️ [수정]: 기존 이미지 URL과 새로 업로드된 URL을 합칩니다.
       final List<String> finalImageUrls = List.from(_existingImageUrls)..addAll(newImageUrls);
 
       // 3. ItemModel 생성
@@ -125,9 +155,11 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
         category: _selectedCategory,
         imageUrls: finalImageUrls,
         location: townName,
-        status: _isSelling && priceInt > 0 ? '판매중' : '나눔',
-        // ⭐️ [수정]: 수정 시 기존 시간 유지, 새 작성 시 Timestamp.now()
+        // 🚨 [수정]: status를 무조건 '판매중'으로 설정합니다.
+        status: '판매중',
         createdAt: isEditing ? widget.editingPost!.createdAt : Timestamp.now(),
+        // 🚀 [추가]: 상세 거래 위치 정보 저장
+        tradeLocationDetail: _selectedTradeLocation,
       );
 
       // 4. Firestore에 데이터 저장/업데이트
@@ -137,7 +169,6 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
       _showSnackbar(message, success: true);
 
       if (mounted) {
-        // ⭐️ [수정]: 수정 완료 시 true를 반환하여 이전 화면(MyPostsScreen)에 성공을 알립니다.
         Navigator.pop(context, true);
       }
 
@@ -151,12 +182,10 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
     }
   }
 
-  // ⭐️ [새 함수]: 기존 이미지 삭제 처리
+  // 기존 이미지 삭제 처리
   void _removeExistingImage(String url) {
     setState(() {
       _existingImageUrls.remove(url);
-      // Note: Firebase Storage에서 파일 자체를 삭제하는 로직은 여기서는 생략합니다.
-      // (게시글 ID와 함께 나중에 일괄적으로 정리하는 것이 일반적입니다.)
     });
   }
 
@@ -204,7 +233,6 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        // ⭐️ [수정]: AppBar 제목 변경
         title: Text(isEditing ? '게시글 수정' : '내 물건 팔기', style: const TextStyle(color: Colors.black)),
         backgroundColor: Colors.white,
         elevation: 0,
@@ -265,7 +293,7 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
             ),
           ),
           // 7. 하단 "작성 완료" 버튼
-          _buildFloatingSubmitButton(isEditing), // ⭐️ [수정]: isEditing 상태 전달
+          _buildFloatingSubmitButton(isEditing),
           // 로딩 오버레이
           if (_isLoading) _buildLoadingOverlay(),
         ],
@@ -294,7 +322,6 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Icon(Icons.camera_alt_outlined, color: Colors.grey),
-                  // ⭐️ [수정]: 기존 이미지 개수 포함하여 표시
                   Text('${_selectedImages.length + _existingImageUrls.length}/10',
                       style: const TextStyle(color: Colors.grey, fontSize: 12)),
                 ],
@@ -303,7 +330,7 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
           ),
           const SizedBox(width: 8),
 
-          // ⭐️ [추가]: 기존 이미지 미리보기 (수정 모드)
+          // 기존 이미지 미리보기 (수정 모드)
           ..._existingImageUrls.map((url) => Padding(
             padding: const EdgeInsets.only(right: 8.0),
             child: Stack(
@@ -321,7 +348,7 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
                   top: 0,
                   right: 0,
                   child: GestureDetector(
-                    onTap: () => _removeExistingImage(url), // ⭐️ [수정]: 기존 이미지 삭제 함수 호출
+                    onTap: () => _removeExistingImage(url),
                     child: Container(
                       padding: const EdgeInsets.all(2),
                       decoration: BoxDecoration(
@@ -391,45 +418,18 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            // 판매하기 / 나누기 버튼
-            ChoiceChip(
-              label: const Text('판매하기'),
-              selected: _isSelling,
-              onSelected: (selected) {
-                setState(() => _isSelling = selected);
-              },
-              selectedColor: Colors.grey.shade900,
-              labelStyle: TextStyle(color: _isSelling ? Colors.white : Colors.black),
-              backgroundColor: Colors.grey.shade200,
-            ),
-            const SizedBox(width: 8),
-            ChoiceChip(
-              label: const Text('나눔하기'),
-              selected: !_isSelling,
-              onSelected: (selected) {
-                setState(() {
-                  _isSelling = !selected;
-                  if (!_isSelling) _priceController.clear();
-                });
-              },
-              selectedColor: Colors.grey.shade900,
-              labelStyle: TextStyle(color: !_isSelling ? Colors.white : Colors.black),
-              backgroundColor: Colors.grey.shade200,
-            ),
-          ],
-        ),
-
+        // 🚨 [수정]: 판매하기/나눔하기 ChoiceChip 제거 (항상 판매 모드)
         // 가격 입력 필드
         ListTile(
           contentPadding: EdgeInsets.zero,
           title: TextField(
             controller: _priceController,
             keyboardType: TextInputType.number,
-            enabled: _isSelling,
-            decoration: InputDecoration(
-              hintText: _isSelling ? '₩ 가격을 입력해주세요.' : '나눔 물품',
+            // 🚨 [수정]: 항상 활성화
+            enabled: true,
+            decoration: const InputDecoration(
+              // 🚨 [수정]: 나눔 문구 제거
+              hintText: '₩ 가격을 입력해주세요.',
               border: InputBorder.none,
             ),
           ),
@@ -437,42 +437,53 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
           onTap: () {},
         ),
 
-        // 가격 제안 받기 체크박스
-        if (_isSelling)
-          Row(
-            children: [
-              Checkbox(
-                value: _isPriceSuggestionAllowed,
-                onChanged: (val) {
-                  setState(() => _isPriceSuggestionAllowed = val ?? false);
-                },
-              ),
-              const Text('가격 제안 받기'),
-            ],
-          ),
+        // 🚨 [수정]: 항상 표시
+        Row(
+          children: [
+            Checkbox(
+              value: _isPriceSuggestionAllowed,
+              onChanged: (val) {
+                setState(() => _isPriceSuggestionAllowed = val ?? false);
+              },
+            ),
+            const Text('가격 제안 받기'),
+          ],
+        ),
       ],
     );
   }
 
   Widget _buildTradeInfoSection() {
+    // 🚀 [추가]: 상세 주소를 표시하기 위한 텍스트
+    final String displayLocation = _selectedTradeLocation != null
+        ? _selectedTradeLocation!['address'] as String
+        : widget.userLocation;
+
+    // 🚀 [추가]: 사용자에게 장소를 설정하라는 힌트
+    final String hintText = _selectedTradeLocation != null
+        ? '거래 희망 상세 장소'
+        : '거래 희망 장소를 지도에서 설정해 주세요.';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text('거래 정보', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         ListTile(
           contentPadding: EdgeInsets.zero,
-          title: const Text('거래 희망 장소'),
-          subtitle: Text(widget.userLocation), // 현재 사용자 위치 표시
+          title: Text(hintText),
+          // 🚀 [수정]: 상세 위치 또는 사용자 동네 표시
+          subtitle: Text(
+            displayLocation,
+            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
+          ),
           trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
-          onTap: () {
-            // TODO: 위치 추가/변경 화면으로 이동하는 로직 추가
-          },
+          // 🚀 [수정]: 클릭 시 지도 선택 함수 호출
+          onTap: _handleLocationSelection,
         ),
       ],
     );
   }
 
-  // ⭐️ [수정]: isEditing 매개변수 추가
   Widget _buildFloatingSubmitButton(bool isEditing) {
     return Positioned(
       bottom: 0,
@@ -495,7 +506,6 @@ class _PostWriteScreenState extends State<PostWriteScreen> {
               ),
             ),
             child: Text(
-              // ⭐️ [수정]: 버튼 텍스트 변경
               _isLoading ? (isEditing ? '수정 중...' : '등록 중...') : (isEditing ? '수정 완료' : '작성 완료'),
               style: const TextStyle(
                 fontSize: 18,

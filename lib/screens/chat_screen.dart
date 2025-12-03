@@ -8,6 +8,7 @@ import '../models/chat_room_models.dart';
 import '../services/chat_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+
 class ChatScreen extends StatefulWidget {
   final String currentUserId;
 
@@ -21,9 +22,16 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   late TabController _tabController;
   final ChatService _chatService = ChatService();
 
+  // ⭐️ [추가] 검색 입력 필드 제어를 위한 컨트롤러
+  final TextEditingController _searchController = TextEditingController();
+
   // 1. ✅ 선택 모드 관련 상태 변수
   Set<String> _selectedChatIds = {};
   bool _isSelectionMode = false; // 선택 모드 상태 유지
+
+  // ⭐️ [변경] 검색 모드 상태 변수
+  bool _isSearching = false;
+  String _searchText = ''; // 검색어 상태 변수 (검색 모드와 분리)
 
   // 채팅방 탭 목록
   final List<String> _tabs = const ['전체', '판매', '구매'];
@@ -31,35 +39,58 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   @override
   void initState() {
     super.initState();
-    // 한국어 날짜 형식 사용을 위해 초기화
-    // 💡 참고: Intl.defaultLocale 대신 앱 전체에서 설정하는 것이 좋습니다.
     Intl.defaultLocale = 'ko_KR';
     _tabController = TabController(length: _tabs.length, vsync: this);
+
+    // ⭐️ [추가] 검색 입력 필드 변경 리스너
+    _searchController.addListener(_onSearchTextChanged);
+  }
+
+  // ⭐️ [추가] 검색어 변경 시 상태 업데이트
+  void _onSearchTextChanged() {
+    setState(() {
+      _searchText = _searchController.text;
+    });
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _searchController.dispose(); // ⭐️ [추가] 컨트롤러 dispose
     super.dispose();
   }
 
   // ⭐️ [수정된 함수] 탭별로 채팅 목록 필터링 로직 구현
   List<ChatRoom> _filterChats(List<ChatRoom> allChats, String tab) {
+    List<ChatRoom> filteredByTab;
+
+    // 1. 탭 필터링
     if (tab == '전체') {
-      return allChats;
+      filteredByTab = allChats;
+    } else if (tab == '판매') {
+      filteredByTab = allChats.where((chat) => chat.sellerId == widget.currentUserId).toList();
+    } else if (tab == '구매') {
+      filteredByTab = allChats.where((chat) => chat.buyerId == widget.currentUserId).toList();
+    } else {
+      filteredByTab = allChats;
     }
 
-    // '판매' 탭: 내가 판매자인 채팅방
-    if (tab == '판매') {
-      return allChats.where((chat) => chat.sellerId == widget.currentUserId).toList();
+    // 2. ⭐️ [검색] 검색어 필터링
+    // 검색 모드일 때만 검색어로 필터링합니다.
+    if (_searchText.isEmpty || !_isSearching) {
+      return filteredByTab;
     }
 
-    // '구매' 탭: 내가 구매자인 채팅방
-    if (tab == '구매') {
-      return allChats.where((chat) => chat.buyerId == widget.currentUserId).toList();
-    }
+    final lowerCaseSearchText = _searchText.toLowerCase();
 
-    return allChats;
+    return filteredByTab.where((chat) {
+      // 💡 실제 앱에서는 상대방의 닉네임을 가져와야 함. 여기서는 ID로 대체
+      final opponentId = _getOpponentId(chat);
+
+      // 검색 조건: 상대방 ID, 마지막 메시지 내용
+      return opponentId.toLowerCase().contains(lowerCaseSearchText) ||
+          chat.lastMessageText.toLowerCase().contains(lowerCaseSearchText);
+    }).toList();
   }
 
   // Timestamp를 'X분 전' 또는 '날짜' 문자열로 변환하는 함수
@@ -307,13 +338,16 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         }
 
         final allChats = snapshot.data ?? [];
-        // ⭐️ [변경] 필터링 함수 호출
+        // ⭐️ [변경] 필터링 함수 호출 (검색어 필터링까지 포함됨)
         final filteredChats = _filterChats(allChats, tab);
 
         if (filteredChats.isEmpty) {
           return Center(
             child: Text(
-              '${tab} 채팅이 없습니다.',
+              _searchText.isNotEmpty && _isSearching
+                  ? '\'$_searchText\' 검색 결과가 없습니다.'
+                  : '${tab} 채팅이 없습니다.',
+              textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.grey, fontSize: 16),
             ),
           );
@@ -366,40 +400,69 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     }
   }
 
+  // ⭐️ [추가] 일반 모드일 때의 제목 위젯
+  Widget _buildDefaultTitle() {
+    return const Text(
+      '채팅',
+      style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+    );
+  }
+
+  // ⭐️ [추가] 검색 모드일 때의 제목(검색 입력 필드) 위젯
+  Widget _buildSearchTitle(BuildContext context) {
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(8.0),
+      ),
+      child: TextField(
+        controller: _searchController,
+        autofocus: true,
+        style: const TextStyle(color: Colors.black, fontSize: 16),
+        decoration: InputDecoration(
+          hintText: '채팅방 이름 또는 내용 검색',
+          hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 16),
+          prefixIcon: const Icon(Icons.search, color: Colors.grey, size: 20),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 8),
+          isDense: true,
+        ),
+      ),
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
+    // 💡 검색 모드일 때 Scaffold를 분리하지 않고 AppBar 내에서 UI를 전환
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
         backgroundColor: Colors.white,
         elevation: 0,
-        // 🚀 [수정] 선택 모드에 따른 앱바 UI 변경
+
+        // 🚀 [핵심 수정] title 위젯을 모드에 따라 동적 전환
         title: _isSelectionMode
             ? Text(
           '채팅방 선택 (${_selectedChatIds.length}개)',
           style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
         )
-            : TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          labelColor: Colors.black,
-          unselectedLabelColor: Colors.grey,
-          indicatorColor: Colors.black,
-          indicatorWeight: 2,
-          tabs: _tabs.map((tab) => Tab(text: tab)).toList(),
+            : (_isSearching
+            ? _buildSearchTitle(context) // 검색 모드일 때 검색 입력 필드를 title로 사용
+            : _buildDefaultTitle() // 일반 모드일 때 '채팅' 제목 사용
         ),
+
+        // 🚀 [핵심 수정] actions 위젯을 모드에 따라 동적 전환
         actions: [
-          // 🚀 [핵심 변경] 선택 모드일 때 삭제 버튼과 취소 버튼만 표시
           if (_isSelectionMode) ...[
-            // 🗑️ 삭제 버튼 (선택된 항목이 1개 이상일 때만 활성화)
+            // 🗑️ 선택 모드 액션
             IconButton(
               icon: Icon(Icons.delete_outline,
                 color: _selectedChatIds.isNotEmpty ? Colors.red : Colors.grey,
               ),
               onPressed: _selectedChatIds.isNotEmpty ? _deleteSelectedChats : null,
             ),
-            // 취소 버튼
             TextButton(
               onPressed: () {
                 setState(() {
@@ -410,24 +473,66 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
               child: const Text('취소', style: TextStyle(color: Colors.blue, fontSize: 16)),
             ),
           ]
+          else if (_isSearching) ...[
+            // 🔍 검색 모드 액션
+            if (_searchText.isNotEmpty)
+              IconButton(
+                icon: const Icon(Icons.clear, color: Colors.grey),
+                onPressed: () {
+                  _searchController.clear();
+                  setState(() {
+                    _searchText = ''; // 검색어 지우기
+                  });
+                },
+              ),
+            TextButton(
+              onPressed: () {
+                _searchController.clear();
+                setState(() {
+                  _isSearching = false; // 검색 모드 종료
+                  _searchText = '';
+                });
+              },
+              child: const Text('취소', style: TextStyle(color: Colors.blue, fontSize: 16)),
+            ),
+          ]
           else
           // 일반 모드 액션
             ...[
+              // ⭐️ 돋보기 아이콘 클릭 시 검색 모드 토글
               IconButton(
                 icon: const Icon(Icons.search, color: Colors.black),
-                onPressed: () { /* 검색 */ },
+                onPressed: () {
+                  setState(() {
+                    _isSearching = true; // 검색 모드로 전환
+                  });
+                },
               ),
               _buildDeleteDropdown(), // 삭제 드롭다운
-              IconButton(
-                icon: const Icon(Icons.notifications_none, color: Colors.black),
-                onPressed: () { /* 알림 */ },
-              ),
               const SizedBox(width: 8),
             ],
         ],
+
+        // ⭐️ [수정] 탭바는 이제 검색 모드일 때만 숨겨집니다.
+        bottom: !_isSearching
+            ? PreferredSize(
+          preferredSize: const Size.fromHeight(48.0),
+          child: TabBar(
+            controller: _tabController,
+            isScrollable: true,
+            labelColor: Colors.black,
+            unselectedLabelColor: Colors.grey,
+            indicatorColor: Colors.black,
+            indicatorWeight: 2,
+            tabs: _tabs.map((tab) => Tab(text: tab)).toList(),
+          ),
+        )
+            : null,
       ),
 
       body: TabBarView(
+        // ⭐️ 검색 모드일 때는 탭을 비활성화하고, 현재 탭의 내용만 필터링해서 보여줍니다.
+        physics: _isSearching ? const NeverScrollableScrollPhysics() : null,
         controller: _tabController,
         children: _tabs.map((tab) => _buildTabViewContent(tab)).toList(),
       ),
